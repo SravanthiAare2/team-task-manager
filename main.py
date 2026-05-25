@@ -161,23 +161,23 @@ def unauthorized():
 @login_required
 def dashboard():
 
-    tasks = Task.query.filter_by(user_id=current_user.id).all() or []
-    projects = Project.query.filter_by(user_id=current_user.id).all() or []
+    try:
+        tasks = Task.query.filter_by(user_id=current_user.id).all()
+        projects = Project.query.filter_by(user_id=current_user.id).all()
 
-    total_tasks = len(tasks)
-    completed_tasks = len([t for t in tasks if t.status == "Completed"])
-    pending_tasks = len([t for t in tasks if t.status == "Pending"])
-    projects_count = len(projects)
+        return render_template(
+            'dashboard.html',
+            tasks=tasks,
+            projects=projects,
+            total_tasks=len(tasks),
+            completed_tasks=len([t for t in tasks if t.status == "Completed"]),
+            pending_tasks=len([t for t in tasks if t.status == "Pending"]),
+            projects_count=len(projects)
+        )
 
-    return render_template(
-        'dashboard.html',
-        total_tasks=total_tasks,
-        completed_tasks=completed_tasks,
-        pending_tasks=pending_tasks,
-        projects_count=projects_count,
-        tasks=tasks,
-        projects=projects
-    )
+    except Exception as e:
+        print("Dashboard error:", e)
+        return "Dashboard error"
 # ================= PROJECT DETAIL =================
 @app.route('/project/<int:project_id>')
 @login_required
@@ -382,4 +382,7 @@ def logout():
 
 # ================= RUN =================
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
+
     app.run(host="0.0.0.0", port=8080)
