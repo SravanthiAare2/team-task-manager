@@ -15,15 +15,12 @@ import os
 app = Flask(__name__)
 
 # ================= CONFIG =================
-app.config['SECRET_KEY'] = os.environ.get(
-    "SECRET_KEY",
-    os.urandom(24).hex()
-)
+app.config['SECRET_KEY'] = 'team-task-manager-secret'
 
 import os
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
     "DATABASE_URL",
-   os.environ.get("DATABASE_URL")
+    "sqlite:///taskmanager.db"
 )
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -33,9 +30,6 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 db = SQLAlchemy(app)
-with app.app_context():
-    db.create_all()
-    
 # ================= ADMIN =================
 ALLOWED_ADMIN_EMAILS = ["admin@gmail.com", "admin1@gmail.com"]
 
@@ -77,7 +71,7 @@ class Task(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    return User.query.get(int(user_id))
 
 
 # ================= HOME =================
@@ -130,26 +124,20 @@ def register():
 def login():
     if request.method == 'POST':
 
-        email = request.form.get('email')
-        password = request.form.get('password')
+        email = request.form['email']
+        password = request.form['password']
 
-        try:
-            user = User.query.filter_by(email=email).first()
-        except Exception as e:
-            print("DB ERROR:", e)
-            flash("Database error")
-            return redirect('/login')
+        user = User.query.filter_by(email=email).first()
 
-        if not user:
-            flash("User not found")
-            return redirect('/login')
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            flash("Login successful")
 
-        if not check_password_hash(user.password, password):
-            flash("Wrong password")
-            return redirect('/login')
+            if user.role == "admin":
+                return redirect('/admin_dashboard')
+            return redirect('/dashboard')
 
-        login_user(user)
-        return redirect('/dashboard')
+        flash("Invalid credentials")
 
     return render_template('login.html')
 
@@ -159,18 +147,25 @@ def login():
 @login_required
 def dashboard():
 
+    total_tasks = Task.query.filter_by(user_id=current_user.id).count()
+    completed_tasks = Task.query.filter_by(user_id=current_user.id, status='Completed').count()
+    pending_tasks = Task.query.filter_by(user_id=current_user.id, status='Pending').count()
+    projects_count = Project.query.filter_by(user_id=current_user.id).count()
+
     tasks = Task.query.filter_by(user_id=current_user.id).all()
     projects = Project.query.filter_by(user_id=current_user.id).all()
 
     return render_template(
         'dashboard.html',
+        total_tasks=total_tasks,
+        completed_tasks=completed_tasks,
+        pending_tasks=pending_tasks,
+        projects_count=projects_count,
         tasks=tasks,
-        projects=projects,
-        total_tasks=len(tasks),
-        completed_tasks=len([t for t in tasks if t.status == "Completed"]),
-        pending_tasks=len([t for t in tasks if t.status == "Pending"]),
-        projects_count=len(projects)
+        projects=projects
     )
+
+
 # ================= PROJECT DETAIL =================
 @app.route('/project/<int:project_id>')
 @login_required
@@ -228,16 +223,15 @@ def admin_dashboard():
         flash("Access denied")
         return redirect('/dashboard')
 
-    users = User.query.all() or []
+    users = User.query.all()
+    projects = db.session.query(Project, User.email).join(User, Project.user_id == User.id).all()
+    tasks = db.session.query(Task, User.email).join(User, Task.user_id == User.id).all()
 
-    projects = Project.query.all() or []
-    tasks = Task.query.all() or []
+    completed_count = sum(1 for t, e in tasks if t.status == "Completed")
+    pending_count = sum(1 for t, e in tasks if t.status == "Pending")
 
-    completed_count = len([t for t in tasks if t.status == "Completed"])
-    pending_count = len([t for t in tasks if t.status == "Pending"])
-
-    admin_count = len([u for u in users if u.role == "admin"])
-    member_count = len([u for u in users if u.role == "member"])
+    admin_count = sum(1 for u in users if u.role == "admin")
+    member_count = sum(1 for u in users if u.role == "member")
 
     return render_template(
         'admin_dashboard.html',
@@ -374,5 +368,9 @@ def logout():
 
 
 # ================= RUN =================
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
